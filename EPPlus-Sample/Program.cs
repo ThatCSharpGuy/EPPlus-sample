@@ -16,6 +16,11 @@ namespace EPPlus_Sample
         static void Main(string[] args)
         {
 
+            if (System.IO.File.Exists("prueba.xlsx"))
+            {
+                System.IO.File.Delete("prueba.xlsx");
+            }
+
             FileInfo prueba = new FileInfo("prueba.xlsx");
 
             using (ExcelPackage excel = new ExcelPackage(prueba))
@@ -27,45 +32,112 @@ namespace EPPlus_Sample
 
                 AddSummary(excel.Workbook);
 
-                HighlightYoungTeachers(excel.Workbook);
+                HighlightCells(excel.Workbook);
+
+                AddConditionalFormatting(excel.Workbook);
 
                 excel.Save();
             }
 
 
 
+            FileInfo uploaded = new FileInfo("teachers.xlsx");
+
+            using (ExcelPackage excel = new ExcelPackage(uploaded))
+            {
+                var teacherWorksheet = excel.Workbook.Worksheets.Single(ws => ws.Name == "Maestros");
+                var cells = teacherWorksheet.Cells;
+                int rowCount = cells["A:A"].Count();
+
+                for (int i = 1; i <= rowCount; i++)
+                {
+                    Console.WriteLine(
+                        cells["A" + i].Value.ToString() + "\t" +
+                        cells["B" + i].Value.ToString() + "\t" +
+                        cells["C" + i].Value.ToString() + "\t" +
+                        cells["D" + i].Value.ToString() + "\t" 
+                        );
+                }
+
+
+            }
+
+
+            Console.Read();
+        }
+
+        private static void AddConditionalFormatting(ExcelWorkbook wb)
+        {
+            var teacherWorksheet = wb.Worksheets.Single(ws => ws.Name == "Maestros");
+
+
+            var lectureLevelCells = teacherWorksheet.Cells["E:E"].Skip(1);
+            var ageCellsStringAddress = "$E$2:$E$31";
+            var ageCellsAddress = new ExcelAddress(ageCellsStringAddress);
+
+            var formatting = teacherWorksheet.ConditionalFormatting.AddTwoColorScale(ageCellsAddress);
+            formatting.LowValue.Type = OfficeOpenXml.ConditionalFormatting.eExcelConditionalFormattingValueObjectType.Formula;
+            formatting.HighValue.Type = OfficeOpenXml.ConditionalFormatting.eExcelConditionalFormattingValueObjectType.Formula;
+            formatting.LowValue.Formula = "MIN(" + ageCellsAddress + ")";
+            formatting.LowValue.Color = Color.LightGreen;
+
+            formatting.HighValue.Formula = "MAX(" + ageCellsAddress + ")";
+            formatting.HighValue.Color = Color.Green;
         }
 
         private static void AddSummary(ExcelWorkbook wb)
         {
-            var teacherWorksheet = wb.Worksheets
-                   .SingleOrDefault(ws => ws.Name == "Resumen") ??
-                   wb.Worksheets.Add("Resumen");
+            var teacherWorksheet = wb.Worksheets.Add("Resumen");
 
-            teacherWorksheet.Cells["A:A"].Style.Font.Bold = true;
+            var titleCell = teacherWorksheet.Cells["A1:B1"];
+            titleCell.Merge = true;
+            titleCell.Style.Font.Bold = true;
+            titleCell.Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
+            titleCell.Value = "Resumen";
+
+            // Supported functions http://epplus.codeplex.com/wikipage?title=Supported%20Functions
+
+            teacherWorksheet.Cells["A2:A4"].Style.Font.Bold = true;
+
+            teacherWorksheet.Cells["A2"].Value = "Edad promedio";
+            teacherWorksheet.Cells["B2"].Formula = "AVERAGE(Maestros!E2:E" + (Database.Teachers.Count() + 1) + ")";
+
+            teacherWorksheet.Cells["A3"].Value = "Profesores sin email";
+            teacherWorksheet.Cells["B3"].Formula = "COUNTIF(Maestros!D2:D" + (Database.Teachers.Count() + 1) + ",\"\")";
         }
 
-        private static void HighlightYoungTeachers(ExcelWorkbook wb)
+        private static void HighlightCells(ExcelWorkbook wb)
         {
-            var teacherWorksheet = wb.Worksheets
-                .Single(ws => ws.Name == "Maestros");
+            var teacherWorksheet = wb.Worksheets.Single(ws => ws.Name == "Maestros");
 
             var cellsWithYoungTeachers = from cell in teacherWorksheet.Cells["E:E"].Skip(1)
-                                         where ((int)cell.Value) < 25
+                                         where ((int)cell.Value) < 20
                                          select cell;
 
             foreach (var cell in cellsWithYoungTeachers)
             {
-                cell.Style.Fill.PatternType = ExcelFillStyle.DarkGray;
-                cell.Style.Fill.BackgroundColor.SetColor(Color.LightGreen);
+                cell.Style.Fill.PatternType = ExcelFillStyle.DarkDown;
+                cell.Style.Fill.BackgroundColor.SetColor(Color.Indigo);
+                cell.Style.Font.Color.SetColor(Color.Snow);
+            }
+
+
+            var lecturesWorksheet = wb.Worksheets
+                .Single(ws => ws.Name == "Clases");
+
+            var willamsTeachersCells = from cell in lecturesWorksheet.Cells["D:D"].Skip(1)
+                                       where ((string)cell.Value) == "advanced"
+                                       select cell;
+
+            foreach (var cell in willamsTeachersCells)
+            {
+                cell.Style.Border.BorderAround(ExcelBorderStyle.MediumDashDot, Color.Blue);
             }
         }
 
         public static void AddTeachers(ExcelWorkbook wb)
         {
-            var teacherWorksheet = wb.Worksheets
-                   .SingleOrDefault(ws => ws.Name == "Maestros") ??
-                   wb.Worksheets.Add("Maestros");
+            var teacherWorksheet = wb.Worksheets.Add("Maestros");
 
             teacherWorksheet.Cells["A1"].Value = "ID";
             teacherWorksheet.Cells["B1"].Value = "Nombre";
@@ -92,20 +164,18 @@ namespace EPPlus_Sample
 
         public static void AddLectures(ExcelWorkbook wb)
         {
-            var worksheet = wb.Worksheets
-                   .SingleOrDefault(ws => ws.Name == "Clases") ??
-                   wb.Worksheets.Add("Clases");
+            var worksheet = wb.Worksheets.Add("Clases");
 
             worksheet.Cells["A1"].Value = "ID";
             worksheet.Cells["B1"].Value = "Nombre";
-            worksheet.Cells["C1"].Value = "Maestro";
+            worksheet.Cells["C1"].Value = "ID Maestro";
             worksheet.Cells["D1"].Value = "Nivel";
 
             worksheet.Cells["A1:D1"].Style.Font.Bold = true;
 
             var query = from t in Database.Teachers
                         join c in Database.Lectures on t.Id equals c.TeacherId
-                        select new { c.Id, c.Name, Teacher = t.GivenName, c.Level };
+                        select new { c.Id, c.Name, c.TeacherId, Teacher = t.GivenName + " " + t.LastName, c.Level };
 
             int cell = 2;
             foreach (var lectuire in query)
@@ -113,7 +183,8 @@ namespace EPPlus_Sample
 
                 worksheet.Cells["A" + cell].Value = lectuire.Id;
                 worksheet.Cells["B" + cell].Value = lectuire.Name;
-                worksheet.Cells["C" + cell].Value = lectuire.Teacher;
+                worksheet.Cells["C" + cell].Value = lectuire.TeacherId;
+                worksheet.Cells["C" + cell].AddComment(lectuire.Teacher, "Antonio Feregrino");
                 worksheet.Cells["D" + cell].Value = lectuire.Level;
 
                 cell++;
